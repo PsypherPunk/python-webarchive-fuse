@@ -3,6 +3,7 @@
 import os
 import re
 import sys
+import time
 import logging
 import progressbar
 from errno import EPERM, ENOENT
@@ -24,6 +25,8 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 
 	def _get_records( self ):
 		statinfo = os.stat( self.warc )
+		self.gid = statinfo.st_gid
+		self.uid = statinfo.st_uid
 		self.tree.create_node( self.warc, "/" )
 		self.records = {}
 		bar = progressbar.ProgressBar( maxval=statinfo.st_size, widgets=[ progressbar.Bar( "=", "[", "]"), " ", progressbar.Percentage() ] )
@@ -84,7 +87,8 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 				( "st_atime", stat.st_atime )
 			] )
 		else:
-			raise FuseOSError( EPERM )
+			return self.name_to_attrs( "/%s" % path )
+#			raise FuseOSError( EPERM )
 
 #	def getxattr( self, path, name, position=0 ):
 #		raise FuseOSError( EPERM )
@@ -115,13 +119,38 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 		logger.debug( path )
 		raise FuseOSError( EPERM )
 
+	def name_to_attrs( self, name ):
+		"""Retrieves attrs for a list of names."""
+		node = self.tree.get_node( name )
+		if node.is_leaf():
+			st_mode = ( S_IFREG | 0440 )
+			size = 0
+#TODO: Pull WarcRecord
+		else:
+			st_mode = ( S_IFDIR | 0440 )
+			size = 0
+		return dict( [
+			( "st_mode", st_mode ),
+#			( "st_ino", 0 ),
+#			( "st_dev", 0 ),
+#			( "st_nlink", 0 ),
+			( "st_uid", self.uid ),
+			( "st_gid", self.gid ),
+			( "st_size", size ), 
+			( "st_ctime", time.time() ),
+			( "st_mtime", time.time() ),
+			( "st_atime", time.time() )
+		] )
+
 	def readdir( self, path, fh ):
 		logger.debug( path )
+		if path != "/":
+			path = "/%s" % path
 		if self.tree.contains( path ):
-			names = []
+			names = [ ".", ".." ]
 			for node in self.tree.all_nodes():
 				if self.tree.parent( node.identifier ) is not None and self.tree.parent( node.identifier ).identifier == path:
-					names.append( node.tag )
+					names.append( ( node.tag, self.name_to_attrs( node.identifier ), 0  ) )
 			return names
 		else:
 			raise FuseOSError( ENOENT )
