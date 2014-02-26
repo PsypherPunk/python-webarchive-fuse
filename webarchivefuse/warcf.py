@@ -45,9 +45,9 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 		bar.finish()
 		logger.debug( self.tree.show() )
 
-	def access( self, path, amode ):
-		logger.debug( path )
-		raise FuseOSError( EPERM )
+#	def access( self, path, amode ):
+#		logger.debug( path )
+#		raise FuseOSError( EPERM )
 
 	def chmod( self, path, mode ):
 		raise FuseOSError( EPERM )
@@ -122,12 +122,15 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 	def name_to_attrs( self, name ):
 		"""Retrieves attrs for a list of names."""
 		node = self.tree.get_node( name )
+		if node is None:
+			raise FuseOSError( ENOENT )
+
 		if node.is_leaf():
 			st_mode = ( S_IFREG | 0440 )
 			size = 0
 #TODO: Pull WarcRecord
 		else:
-			st_mode = ( S_IFDIR | 0440 )
+			st_mode = ( S_IFDIR | 0550 )
 			size = 0
 		return dict( [
 			( "st_mode", st_mode ),
