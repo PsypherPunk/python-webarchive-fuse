@@ -29,7 +29,8 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 	"""Filesystem built on a WARC's URI paths."""
 	def __init__( self, warc ):
 		self.warc = warc
-		self.fh = WarcRecord.open_archive( warc, gzip="auto" )
+		logger.debug( "Mounting %s" % self.warc )
+		self.fh = WarcRecord.open_archive( warc, gzip="auto", mode="rb" )
 		self.tree = Tree()
 		self._get_records()
 
@@ -44,7 +45,7 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 		bar.start()
 		for( offset, record, errors ) in self.fh.read_records( limit=None ):
 			if record is not None and record.type != WarcRecord.WARCINFO:
-				logger.debug( record.type )
+				logger.debug( "%s:%s" % ( record.type, record.url ) )
 				parent = "/"
 				nodes = [ record.type ] + re.split( "/+", record.url )
 				for e in nodes:
@@ -90,7 +91,7 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 		if path == "/":
 			stat = os.stat( self.warc )
 			return dict( [
-				( "st_mode", ( S_IFDIR | 0440 ) ),
+				( "st_mode", ( S_IFDIR | 0444 ) ),
 				( "st_ino", stat.st_ino ),
 				( "st_dev", stat.st_dev ),
 				( "st_nlink", stat.st_nlink ),
@@ -147,7 +148,8 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 			raise FuseOSError( ENOENT )
 
 		mime, data = node.record.content
-		return data[ offset:size ]
+		end = offset + size
+		return data[ offset:end ]
 
 	def name_to_attrs( self, name ):
 		"""Retrieves attrs for a path name."""
@@ -157,18 +159,18 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 			raise FuseOSError( ENOENT )
 
 		if node.is_leaf():
-			st_mode = ( S_IFREG | 0440 )
+			st_mode = ( S_IFREG | 0444 )
 			size = node.record.content_length
 			timestamp = time.mktime( parse( node.record.date ).timetuple() )
 		else:
-			st_mode = ( S_IFDIR | 0550 )
+			st_mode = ( S_IFDIR | 0555 )
 			size = 0
 			timestamp = time.time()
 		return dict( [
 			( "st_mode", st_mode ),
-#			( "st_ino", 0 ),
-#			( "st_dev", 0 ),
-#			( "st_nlink", 0 ),
+			( "st_ino", 0 ),
+			( "st_dev", 0 ),
+			( "st_nlink", 0 ),
 			( "st_uid", self.uid ),
 			( "st_gid", self.gid ),
 			( "st_size", size ), 
