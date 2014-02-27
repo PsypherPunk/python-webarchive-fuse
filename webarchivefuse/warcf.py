@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import time
+import treelib
 import logging
 import progressbar
 from errno import EPERM, ENOENT
@@ -15,6 +16,11 @@ from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
 LOGGING_FORMAT="[%(asctime)s] %(levelname)s: %(message)s"
 logging.basicConfig( format=LOGGING_FORMAT, level=logging.DEBUG )
 logger = logging.getLogger( "webarchivefuse" )
+
+class WarcRecordNode( Node ):
+	def set_record( self, record, offset ):
+		self.record = record
+		self.offset = offset
 
 class WarcFileSystem( LoggingMixIn, Operations ):
 	def __init__( self, warc ):
@@ -38,7 +44,9 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 				for e in nodes:
 					identifier = "/".join( [ parent, e ] )
 					if not self.tree.contains( identifier ):
-						self.tree.create_node( e, identifier, parent=parent )
+						node = WarcRecordNode( tag=e, identifier=identifier )
+						node.set_record( record, offset )
+						self.tree.add_node( node, parent=parent )
 					parent = identifier
 				self.records[ record.url ] = ( offset, record )
 				bar.update( offset )
@@ -109,7 +117,11 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 		raise FuseOSError( EPERM )
 
 	def open( self, path, flags ):
-		logger.debug( path )
+		if path != "/":
+			path = "/%s" % path
+		node = self.tree.get_node( path )
+		print node
+		print node.record.url
 		raise FuseOSError( EPERM )
 
 #	def opendir( self, path ):
@@ -121,6 +133,7 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 
 	def name_to_attrs( self, name ):
 		"""Retrieves attrs for a list of names."""
+		logger.debug( name )
 		node = self.tree.get_node( name )
 		if node is None:
 			raise FuseOSError( ENOENT )
