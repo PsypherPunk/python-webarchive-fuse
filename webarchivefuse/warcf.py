@@ -9,7 +9,9 @@ import logging
 import progressbar
 from errno import EPERM, ENOENT
 from treelib import Node, Tree
+from dateutil.parser import parse
 from hanzo.warctools import WarcRecord
+from hanzo.warctools.stream import open_record_stream
 from stat import S_IFDIR, S_IFLNK, S_IFREG
 from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
 
@@ -18,11 +20,13 @@ logging.basicConfig( format=LOGGING_FORMAT, level=logging.DEBUG )
 logger = logging.getLogger( "webarchivefuse" )
 
 class WarcRecordNode( Node ):
+	"""Node with a WarcRecord and offset."""
 	def set_record( self, record, offset ):
 		self.record = record
 		self.offset = offset
 
 class WarcFileSystem( LoggingMixIn, Operations ):
+	"""Filesystem built on a WARC's URI paths."""
 	def __init__( self, warc ):
 		self.warc = warc
 		self.fh = WarcRecord.open_archive( warc, gzip="auto" )
@@ -30,6 +34,7 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 		self._get_records()
 
 	def _get_records( self ):
+		"""Parses a WARC, building a hierarchical tree."""
 		statinfo = os.stat( self.warc )
 		self.gid = statinfo.st_gid
 		self.uid = statinfo.st_uid
@@ -38,7 +43,8 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 		bar = progressbar.ProgressBar( maxval=statinfo.st_size, widgets=[ progressbar.Bar( "=", "[", "]"), " ", progressbar.Percentage() ] )
 		bar.start()
 		for( offset, record, errors ) in self.fh.read_records( limit=None ):
-			if record is not None:
+			if record is not None and record.type != WarcRecord.WARCINFO:
+				logger.debug( record.type )
 				parent = "/"
 				nodes = [ record.type ] + re.split( "/+", record.url )
 				for e in nodes:
@@ -69,8 +75,8 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 	def destroy( self, path ):
 		self.fh.close()
 
-	def flush( self, path, fh ):
-		raise FuseOSError( EPERM )
+#	def flush( self, path, fh ):
+#		raise FuseOSError( EPERM )
 
 	def fsync( self, path, datasync, fh ):
 		raise FuseOSError( EPERM )
@@ -79,6 +85,7 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 		raise FuseOSError( EPERM )
 
 	def getattr( self, path, fh=None ):
+		"""Returns stat info for a path in the tree."""
 		logger.debug( path )
 		if path == "/":
 			stat = os.stat( self.warc )
@@ -96,7 +103,6 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 			] )
 		else:
 			return self.name_to_attrs( "/%s" % path )
-#			raise FuseOSError( EPERM )
 
 #	def getxattr( self, path, name, position=0 ):
 #		raise FuseOSError( EPERM )
@@ -119,20 +125,32 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 	def open( self, path, flags ):
 		if path != "/":
 			path = "/%s" % path
+
 		node = self.tree.get_node( path )
-		print node
-		print node.record.url
-		raise FuseOSError( EPERM )
+		if node is None:
+			raise FuseOSError( ENOENT )
+
+		return node.offset
 
 #	def opendir( self, path ):
 #		raise FuseOSError( EPERM )
 
 	def read( self, path, size, offset, fh ):
-		logger.debug( path )
-		raise FuseOSError( EPERM )
+		"""Reads 'size' data from 'path', starting at 'offset'."""
+		logger.debug( "read %s from %s at %s " % ( size, path, offset ) )
+
+		if path != "/":
+			path = "/%s" % path
+
+		node = self.tree.get_node( path )
+		if node is None:
+			raise FuseOSError( ENOENT )
+
+		mime, data = node.record.content
+		return data[ offset:size ]
 
 	def name_to_attrs( self, name ):
-		"""Retrieves attrs for a list of names."""
+		"""Retrieves attrs for a path name."""
 		logger.debug( name )
 		node = self.tree.get_node( name )
 		if node is None:
@@ -140,11 +158,12 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 
 		if node.is_leaf():
 			st_mode = ( S_IFREG | 0440 )
-			size = 0
-#TODO: Pull WarcRecord
+			size = node.record.content_length
+			timestamp = time.mktime( parse( node.record.date ).timetuple() )
 		else:
 			st_mode = ( S_IFDIR | 0550 )
 			size = 0
+			timestamp = time.time()
 		return dict( [
 			( "st_mode", st_mode ),
 #			( "st_ino", 0 ),
@@ -153,9 +172,9 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 			( "st_uid", self.uid ),
 			( "st_gid", self.gid ),
 			( "st_size", size ), 
-			( "st_ctime", time.time() ),
-			( "st_mtime", time.time() ),
-			( "st_atime", time.time() )
+			( "st_ctime", timestamp ),
+			( "st_mtime", timestamp ),
+			( "st_atime", timestamp )
 		] )
 
 	def readdir( self, path, fh ):
@@ -210,11 +229,4 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 
 	def write( self, path, data, offset, fh ):
 		raise FuseOSError( EPERM )
-
-if __name__ == "__main__":
-	if len( sys.argv ) != 3:
-		print( "usage: %s <warc> <mountpoint>" % sys.argv[ 0 ] )
-		sys.exit( 1 )
-
-	fuse = FUSE( WarcFileSystem( sys.argv[ 1 ] ), sys.argv[ 2 ], foreground=True )
 

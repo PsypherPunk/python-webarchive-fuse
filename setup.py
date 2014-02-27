@@ -12,4 +12,7 @@ setup(
 	install_requires=[
 		"treelib",
 	],
+	data_files=[
+		( "/usr/local/bin", [ "webarchivefuse.py" ] ),
+	],
 )
