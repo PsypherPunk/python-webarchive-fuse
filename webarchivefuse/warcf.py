@@ -4,7 +4,6 @@ import os
 import re
 import sys
 import time
-import treelib
 import logging
 import progressbar
 from errno import EPERM, ENOENT, ENODATA
@@ -49,7 +48,6 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 		bar.start()
 		for( offset, record, errors ) in self.fh.read_records( limit=None ):
 			if record is not None and record.type != WarcRecord.WARCINFO:
-				logger.debug( "%s:%s" % ( record.type, record.url ) )
 				parent = "/"
 				nodes = [ record.type ] + re.split( "/+", record.url )
 				for e in nodes:

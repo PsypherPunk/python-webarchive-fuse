@@ -11,6 +11,9 @@ setup(
 	long_description=open( "README.md" ).read(),
 	install_requires=[
 		"treelib",
+		"progressbar",
+		"python-dateutil",
+		"hanzo-warctools",
 	],
 	data_files=[
 		( "/usr/local/bin", [ "webarchivefuse.py" ] ),
