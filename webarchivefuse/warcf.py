@@ -24,9 +24,17 @@ class WarcRecordNode( Node ):
 		Node.__init__( self, tag=tag, identifier=identifier, expanded=expanded )
 		self.record = record
 		self.offset = offset
+		self.payload_offset = 0
 		self.xattrs = {}
 		for k, v in record.headers:
 			self.xattrs[ k ] = v
+		if record.type == WarcRecord.RESPONSE and record.url.startswith( "http" ):
+			mime, data = record.content
+			if data.startswith( "HTTP" ):
+				match = re.search( "\r?\n(\r?\n)+", data, re.MULTILINE )
+				self.xattrs[ "http.headers" ] = data[ 0:match.end() ]
+				self.payload_offset = match.end()
+
 
 class WarcFileSystem( LoggingMixIn, Operations ):
 	"""Filesystem built on a WARC's URI paths."""
@@ -167,6 +175,7 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 		if node is None:
 			raise FuseOSError( ENOENT )
 
+		offset += node.payload_offset
 		mime, data = node.record.content
 		end = offset + size
 		return data[ offset:end ]
