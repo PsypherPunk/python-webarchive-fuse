@@ -7,7 +7,7 @@ import time
 import treelib
 import logging
 import progressbar
-from errno import EPERM, ENOENT
+from errno import EPERM, ENOENT, ENODATA
 from treelib import Node, Tree
 from dateutil.parser import parse
 from hanzo.warctools import WarcRecord
@@ -21,9 +21,13 @@ logger = logging.getLogger( "webarchivefuse" )
 
 class WarcRecordNode( Node ):
 	"""Node with a WarcRecord and offset."""
-	def set_record( self, record, offset ):
+	def __init__( self, record, offset, tag=None, identifier=None, expanded=True ):
+		Node.__init__( self, tag=tag, identifier=identifier, expanded=expanded )
 		self.record = record
 		self.offset = offset
+		self.xattrs = {}
+		for k, v in record.headers:
+			self.xattrs[ k ] = v
 
 class WarcFileSystem( LoggingMixIn, Operations ):
 	"""Filesystem built on a WARC's URI paths."""
@@ -51,8 +55,7 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 				for e in nodes:
 					identifier = "/".join( [ parent, e ] )
 					if not self.tree.contains( identifier ):
-						node = WarcRecordNode( tag=e, identifier=identifier )
-						node.set_record( record, offset )
+						node = WarcRecordNode( record, offset, tag=e, identifier=identifier )
 						self.tree.add_node( node, parent=parent )
 					parent = identifier
 				self.records[ record.url ] = ( offset, record )
@@ -105,8 +108,19 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 		else:
 			return self.name_to_attrs( "/%s" % path )
 
-#	def getxattr( self, path, name, position=0 ):
-#		raise FuseOSError( EPERM )
+	def getxattr( self, path, name, position=0 ):
+		"""Returns the value for an extended attribute."""
+		if path != "/":
+			path = "/%s" % path
+
+		node = self.tree.get_node( path )
+		if node is None:
+			raise FuseOSError( ENOENT )
+
+		try:
+			return node.xattrs[ name ]
+		except KeyError:
+			raise FuseOSError( ENODATA )
 
 	def init( self, path ):
 		pass
@@ -115,7 +129,14 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 		raise FuseOSError( EPERM )
 
 	def listxattr( self, path ):
-		raise FuseOSError( EPERM )
+		"""Returns a list of extended attribute names."""
+		if path != "/":
+			path = "/%s" % path
+
+		node = self.tree.get_node( path )
+		if node is None:
+			raise FuseOSError( ENOENT )
+		return node.xattrs.keys()
 
 	def mkdir( self, path, mode ):
 		raise FuseOSError( EPERM )
@@ -124,6 +145,7 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 		raise FuseOSError( EPERM )
 
 	def open( self, path, flags ):
+		"""Should return numeric filehandle; returns file offset for convenience."""
 		if path != "/":
 			path = "/%s" % path
 
@@ -180,6 +202,7 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 		] )
 
 	def readdir( self, path, fh ):
+		"""Returns a tuple of all files in path."""
 		logger.debug( path )
 		if path != "/":
 			path = "/%s" % path
@@ -193,7 +216,6 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 			raise FuseOSError( ENOENT )
 
 	def readlink( self, path ):
-		logger.debug( path )
 		raise FuseOSError( EPERM )
 
 #	def release( self, path, fh ):
