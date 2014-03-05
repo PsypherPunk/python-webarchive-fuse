@@ -10,7 +10,6 @@ from errno import EPERM, ENOENT, ENODATA
 from treelib import Node, Tree
 from dateutil.parser import parse
 from hanzo.warctools import WarcRecord
-from hanzo.warctools.stream import open_record_stream
 from stat import S_IFDIR, S_IFLNK, S_IFREG
 from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
 
@@ -26,6 +25,7 @@ class WarcRecordNode( Node ):
 		self.offset = offset
 		self.payload_offset = 0
 		self.xattrs = {}
+		self.xattrs[ "offset" ] = str( offset )
 		for k, v in record.headers:
 			self.xattrs[ k ] = v
 		if record.type == WarcRecord.RESPONSE and record.url.startswith( "http" ):
