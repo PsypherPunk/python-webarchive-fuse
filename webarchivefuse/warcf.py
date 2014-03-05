@@ -1,21 +1,28 @@
 #!/usr/bin/env python
 
+"""
+Defines a filesystem built around the contents of a WARC file. Directory
+structure is based around the paths of each URL therein.
+"""
+
 import os
 import re
 import sys
 import time
 import logging
 import progressbar
-from errno import EPERM, ENOENT, ENODATA
+from datetime import datetime
 from treelib import Node, Tree
 from dateutil.parser import parse
 from hanzo.warctools import WarcRecord
+from errno import EPERM, ENOENT, ENODATA
 from stat import S_IFDIR, S_IFLNK, S_IFREG
 from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
 
 LOGGING_FORMAT="[%(asctime)s] %(levelname)s: %(message)s"
 logging.basicConfig( format=LOGGING_FORMAT, level=logging.DEBUG )
 logger = logging.getLogger( "webarchivefuse" )
+logging.root.setLevel( logging.DEBUG )
 
 class WarcRecordNode( Node ):
 	"""Node with a WarcRecord and offset."""
@@ -57,8 +64,8 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 		for( offset, record, errors ) in self.fh.read_records( limit=None ):
 			if record is not None and record.type != WarcRecord.WARCINFO:
 				parent = "/"
-				nodes = [ record.type ] + re.split( "/+", record.url )
-				for e in nodes:
+				segments = [ record.type ] + re.split( "/+", record.url )
+				for e in segments:
 					identifier = "/".join( [ parent, e ] )
 					if not self.tree.contains( identifier ):
 						node = WarcRecordNode( record, offset, tag=e, identifier=identifier )
@@ -190,7 +197,11 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 		if node.is_leaf():
 			st_mode = ( S_IFREG | 0444 )
 			size = node.record.content_length
-			timestamp = time.mktime( parse( node.record.date ).timetuple() )
+			try:
+				timestamp = time.mktime( parse( node.record.date ).timetuple() )
+			except ValueError as v:
+				logger.warning( "Error parsing time: %s [%s]" % ( node.record.date, str( v ) ) )
+				timestamp = time.mktime( datetime.fromtimestamp( 0 ).timetuple() )
 		else:
 			st_mode = ( S_IFDIR | 0555 )
 			size = 0
@@ -214,10 +225,11 @@ class WarcFileSystem( LoggingMixIn, Operations ):
 		if path != "/":
 			path = "/%s" % path
 		if self.tree.contains( path ):
-			names = [ ".", ".." ]
-			for node in self.tree.all_nodes():
-				if self.tree.parent( node.identifier ) is not None and self.tree.parent( node.identifier ).identifier == path:
-					names.append( ( node.tag, self.name_to_attrs( node.identifier ), 0  ) )
+			names = []
+
+			for c in self.tree.get_node( path ).fpointer:
+				child = self.tree.get_node( c )
+				names.append( ( child.tag, self.name_to_attrs( child.identifier ), 0  ) )
 			return names
 		else:
 			raise FuseOSError( ENOENT )
